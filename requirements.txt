@@ -1,0 +1,6 @@
+websockets
+kafka-python
+psycopg2-binary
+streamlit
+pandas
+pytest
