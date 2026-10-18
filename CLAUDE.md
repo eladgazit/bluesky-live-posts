@@ -24,6 +24,8 @@ Bluesky Jetstream WebSocket (`wantedCollections=app.bsky.feed.post`) → `src/pr
 
 ## Commands
 
+`make run` does everything below in one go (venv, Docker, topic, consumer, producer, dashboard; Ctrl-C stops the Python apps, `make down` stops Docker). It refuses to start if a producer/consumer is already running. `make test` runs pytest. `make eval` runs `src/evals.py` (data quality checks on the last 15 minutes of `posts`; thresholds and rationale in `EVALS.md`; exit 1 on any FAIL, WARN never fails). `make shutdown` stops all this project's Python processes (matched by working directory) and runs `docker compose down`; Postgres data survives (volume) but Kafka's topic and unconsumed messages do not (no volume).
+
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt

@@ -136,13 +136,38 @@ Run with `pytest` (PostgreSQL must be running).
 |---|---|---|
 | `test_parsing.py` | Unit | Parsing a sample message, hashtag extraction, missing or malformed fields, timestamp handling, and the consumer skipping bad messages. No database needed. |
 | `test_db.py` | Integration | Rows stored correctly, duplicate handling, bad rows skipped, and a parsed event surviving the round trip through PostgreSQL. |
+| `test_evals.py` | Data quality | Every eval check flipping from PASS to WARN/FAIL at its threshold on fixed data, plus window, small-sample and empty-table behavior. |
 | `test_queries.py` | Dashboard | Every function in `queries.py` against 10 fixed seed posts with exact expected numbers, plus the dashboard loading with and without data (Streamlit `AppTest`). |
 
 Tests use a separate `bluesky_test` database, created automatically from `db/init.sql`, and refuse to run against any other database. They assert exact numbers on fixed data instead of live data, since the live stream is always changing.
 
 ## Getting started
 
-**Prerequisites:** Docker with Docker Compose, and Python 3.9 or newer.
+**Prerequisites:** Docker with Docker Compose, Python 3.9 or newer, and `make`.
+
+### Quick start
+
+```bash
+make run
+```
+
+This one command creates the virtual environment and installs dependencies (first run only), starts Kafka, Kafka UI and PostgreSQL and waits until they are healthy, creates the `bluesky-posts` topic, and then starts the consumer, the producer and the dashboard in a single terminal with prefixed logs. Open <http://localhost:8501> (if that port is busy, Streamlit prints the one it picked). Press Ctrl-C to stop the three programs; the Docker containers keep running.
+
+| Command | What it does |
+|---|---|
+| `make run` | Start everything |
+| `make test` | Run the test suite (starts Docker if needed) |
+| `make eval` | Check the data quality of the `posts` table (see [EVALS.md](EVALS.md)); exits 1 if any check fails |
+| `make shutdown` | Stop everything: the Python programs (including a running `make run`) and the Docker containers |
+| `make down` | Stop only the Docker containers |
+
+Stored posts survive `make shutdown` and `make down` (they live in a Docker volume). Kafka's buffer does not: the topic and any messages not yet consumed are discarded, and `make run` simply recreates the topic. `make shutdown` only touches processes started from this project folder.
+
+`make run` refuses to start if a producer or consumer is already running, because a second copy would send duplicate messages to Kafka.
+
+### Step by step
+
+The same thing manually:
 
 ```bash
 # 1. Python environment
@@ -168,7 +193,7 @@ cd src && python producer.py           # terminal 2
 streamlit run src/dashboard.py         # terminal 3, from the project root
 ```
 
-Open the dashboard at <http://localhost:8501>. Kafka UI is at <http://localhost:8080>. Stop each program with Ctrl-C and the infrastructure with `docker compose down` (add `-v` to also delete the stored posts).
+Open the dashboard at <http://localhost:8501>. Kafka UI is at <http://localhost:8080>. Stop each program with Ctrl-C and everything with `make shutdown` (or only the infrastructure with `docker compose down`; add `-v` to also delete the stored posts).
 
 ### Inspecting the data
 ```bash
@@ -189,6 +214,9 @@ pytest tests/test_parsing.py           # unit tests only, no database
 .
 ├── docker-compose.yml     # Kafka (KRaft), Kafka UI, PostgreSQL
 ├── db/init.sql            # posts table
+├── Makefile               # make run / test / down
+├── scripts/run.sh         # starts and supervises consumer, producer, dashboard
+├── scripts/shutdown.sh    # stops the Python programs and the containers
 ├── requirements.txt
 ├── pytest.ini
 ├── src/
@@ -198,6 +226,7 @@ pytest tests/test_parsing.py           # unit tests only, no database
 │   ├── db.py              # connection and batch insert
 │   ├── consumer.py        # Kafka -> PostgreSQL
 │   ├── queries.py         # dashboard SQL
+│   ├── evals.py           # data quality checks on the posts table
 │   └── dashboard.py       # Streamlit app
 └── tests/                 # unit, integration and dashboard tests
 ```
