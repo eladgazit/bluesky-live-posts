@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Starts consumer, producer and dashboard in one terminal with prefixed logs.
-# Ctrl-C stops all three. Infrastructure (Docker) is left running; use `make down`.
+# Starts consumer, producer, evals (every minute) and dashboard in one terminal with prefixed logs.
+# Ctrl-C stops all of them. Infrastructure (Docker) is left running; use `make down`.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -43,13 +43,14 @@ trap 'exit 0' INT TERM   # Ctrl-C is a normal way to stop: run cleanup via EXIT,
 
 start consumer  src "$PWD/.venv/bin/python" consumer.py
 start producer  src "$PWD/.venv/bin/python" producer.py
+start evals     src "$PWD/.venv/bin/python" evals.py --every 60
 start dashboard .   "$PWD/.venv/bin/streamlit" run src/dashboard.py \
   --server.headless true --browser.gatherUsageStats false
 
 echo "Pipeline running. Dashboard: http://localhost:8501  |  Kafka UI: http://localhost:8080"
 echo "Press Ctrl-C to stop."
 
-# Exit (and clean up) as soon as any of the three dies, instead of running half a pipeline.
+# Exit (and clean up) as soon as any of them dies, instead of running half a pipeline.
 # (Polling because macOS ships bash 3.2, which has no `wait -n`.)
 while true; do
   for pid in "${pids[@]}"; do

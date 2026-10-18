@@ -10,7 +10,7 @@ The checks `src/evals.py` runs against `posts`, with the reasoning behind each t
   - **WARN:** quality is drifting or a known imperfection is present, but the data is usable.
 - **Result:** one line per check (`PASS`/`WARN`/`FAIL`, the measured value and the threshold), a summary, and an exit code: `0` if no FAIL, `1` if any FAIL. WARNs never change the exit code.
 - **Too little data:** rate-based checks (any "share of rows" check) are `SKIP`ped if the window has fewer than **500 rows**, because percentages on a handful of rows are noise. The volume check reports that situation on its own.
-- **Read-only:** evals only `SELECT`. They never modify data.
+- **Read-only on `posts`:** evals only `SELECT` from it. Each run appends one row per check to `eval_results` (run time, check, status, value, passed; `passed` is false only for FAIL). The dashboard's "Data quality" panel reads that table. `make run` repeats the evals every 60 s; `python evals.py --every N` does it on any interval.
 
 ## Baseline
 

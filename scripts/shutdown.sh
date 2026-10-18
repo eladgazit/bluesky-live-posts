@@ -37,6 +37,7 @@ echo "Stopping Python processes..."
 stop "make run supervisor" "scripts/run\.sh"   # stops its three children in order
 stop "dashboard"           "streamlit run"
 stop "producer"            "producer\.py"
+stop "evals"               "evals\.py"
 stop "consumer"            "consumer\.py"
 
 echo "Stopping Docker containers..."

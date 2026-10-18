@@ -197,3 +197,36 @@ def test_empty_table(conn):
     assert result["F2"] == evals.SKIP
     assert result["C1"] == evals.SKIP
     assert evals.exit_code(evals.run_evals(conn, now=NOW)) == 1
+
+
+def test_only_old_data_means_a_stalled_pipeline(conn):
+    # Plenty of clean rows, but the newest arrived 2 hours ago: the pipeline has stopped
+    seed(conn, HEALTHY_ROWS, now=NOW - timedelta(hours=2))
+
+    result = statuses(conn)
+
+    assert result["F1"] == evals.FAIL
+    assert result["V1"] == evals.FAIL
+    assert result["C1"] == evals.SKIP      # nothing in the 15-minute window to judge
+    assert evals.exit_code(evals.run_evals(conn, now=NOW)) == 1
+
+
+# --- saving runs -------------------------------------------------------------------------
+
+def test_a_run_is_saved_with_one_row_per_check(healthy):
+    results = evals.run_evals(healthy, now=NOW)
+    evals.save_results(healthy, results, run_at=NOW)
+
+    with healthy.cursor() as cur:
+        cur.execute("SELECT count(*), count(DISTINCT check_id), bool_and(passed), min(run_at) "
+                    "FROM eval_results")
+        assert cur.fetchone() == (17, 17, True, NOW)
+
+
+def test_failed_checks_are_saved_as_not_passed(healthy):
+    damage(healthy, "did = 'not-a-did'", 1)
+    evals.save_results(healthy, evals.run_evals(healthy, now=NOW), run_at=NOW)
+
+    with healthy.cursor() as cur:
+        cur.execute("SELECT check_id, status, passed FROM eval_results WHERE NOT passed")
+        assert cur.fetchall() == [("Va7", "FAIL", False)]

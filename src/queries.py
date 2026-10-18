@@ -54,3 +54,27 @@ def latest_posts(conn, limit: int = 20) -> list:
         ORDER BY ingested_at DESC, id DESC
         LIMIT {int(limit)}
     """)
+
+
+def latest_eval_run(conn) -> list:
+    """(check_id, check, status, value) for every check of the most recent saved eval run."""
+    return _fetch(conn, """
+        SELECT check_id, check_name, status, value
+        FROM eval_results
+        WHERE run_at = (SELECT max(run_at) FROM eval_results)
+        ORDER BY id
+    """)
+
+
+def eval_score_history(conn, limit: int = 60) -> list:
+    """(run_at, passed, total) for the last `limit` runs, oldest first. SKIPped checks are
+    not counted: they judged nothing."""
+    return _fetch(conn, f"""
+        SELECT run_at,
+               count(*) FILTER (WHERE passed AND status <> 'SKIP') AS passed,
+               count(*) FILTER (WHERE status <> 'SKIP')            AS total
+        FROM eval_results
+        WHERE run_at IN (SELECT DISTINCT run_at FROM eval_results ORDER BY run_at DESC LIMIT {int(limit)})
+        GROUP BY run_at
+        ORDER BY run_at
+    """)

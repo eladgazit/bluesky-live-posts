@@ -1,11 +1,15 @@
 """Data quality evals for the posts table. EVALS.md explains each check and threshold.
 
-Run with:  python src/evals.py [--window MINUTES]     (exit code 1 if any check FAILs)
+Run with:  python src/evals.py [--window MINUTES] [--every SECONDS]   (exit code 1 if any check FAILs)
+
+Every run is saved to the eval_results table (the dashboard reads it). With --every the
+script keeps running and repeats the evals on that interval.
 """
 import argparse
 import sys
+import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from db import get_conn
@@ -168,6 +172,18 @@ def run_evals(conn, window_minutes: int = WINDOW_MINUTES, now: Optional[datetime
     return results
 
 
+def save_results(conn, results: list, run_at: Optional[datetime] = None) -> None:
+    """Append one row per check to eval_results; all rows of a run share run_at."""
+    if run_at is None:
+        run_at = datetime.now(timezone.utc)
+    rows = [(run_at, r.id, r.name, r.status, r.value, r.status != FAIL) for r in results]
+    with conn.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO eval_results (run_at, check_id, check_name, status, value, passed) "
+            "VALUES (%s, %s, %s, %s, %s, %s)", rows)
+    conn.commit()
+
+
 def exit_code(results: list) -> int:
     return 1 if any(r.status == FAIL for r in results) else 0
 
@@ -181,19 +197,36 @@ def format_results(results: list, window_minutes: int = WINDOW_MINUTES) -> str:
     return "\n".join(lines)
 
 
+def run_once(window_minutes: int, save: bool = True) -> list:
+    conn = get_conn()
+    try:
+        results = run_evals(conn, window_minutes=window_minutes)
+        if save:
+            save_results(conn, results)
+    finally:
+        conn.rollback()  # nothing left uncommitted
+        conn.close()
+    print(format_results(results, window_minutes), flush=True)
+    return results
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Check data quality of the posts table")
     parser.add_argument("--window", type=int, default=WINDOW_MINUTES, help="minutes (default 15)")
+    parser.add_argument("--every", type=int, metavar="SECONDS",
+                        help="keep running and repeat the evals on this interval")
+    parser.add_argument("--no-save", action="store_true", help="don't write to eval_results")
     args = parser.parse_args()
 
-    conn = get_conn()
-    try:
-        results = run_evals(conn, window_minutes=args.window)
-    finally:
-        conn.rollback()  # read-only: nothing to keep
-        conn.close()
-    print(format_results(results, args.window))
-    sys.exit(exit_code(results))
+    if args.every:
+        while True:  # a failed run (e.g. Postgres restarting) must not stop the loop
+            try:
+                run_once(args.window, save=not args.no_save)
+            except Exception as exc:
+                print(f"eval run failed: {exc}", file=sys.stderr, flush=True)
+            time.sleep(args.every)
+
+    sys.exit(exit_code(run_once(args.window, save=not args.no_save)))
 
 
 if __name__ == "__main__":

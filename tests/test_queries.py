@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
+import evals
 import queries
 
 DASHBOARD = str(Path(__file__).resolve().parent.parent / "src" / "dashboard.py")
@@ -76,6 +77,8 @@ def test_queries_on_an_empty_table(conn):
     assert queries.top_languages(conn) == []
     assert queries.top_hashtags(conn) == []
     assert queries.latest_posts(conn) == []
+    assert queries.latest_eval_run(conn) == []
+    assert queries.eval_score_history(conn) == []
     rows = queries.posts_per_minute(conn)
     assert len(rows) == 60 and all(count == 0 for _, count in rows)
 
@@ -95,6 +98,7 @@ def test_dashboard_loads_with_data(seeded, dashboard_db):
         "Top 10 languages",
         "Top 15 hashtags",
         "20 latest posts",
+        "Data quality",
     ]
 
     hashtags, latest = at.dataframe[0].value, at.dataframe[1].value
@@ -107,4 +111,57 @@ def test_dashboard_loads_with_an_empty_database(conn, dashboard_db):
     at = run_dashboard()
 
     assert not at.exception
-    assert len(at.subheader) == 4
+    assert len(at.subheader) == 5
+    assert at.info[0].value.startswith("No eval runs saved yet")
+
+
+# --- eval results: saved runs, latest run, score over time ----------------------
+
+def save_run(conn, run_at, statuses):
+    """Save a fake eval run: one check per status in `statuses` (ids C1, C2, ...)."""
+    results = [evals.Result(f"C{i}", f"check {i}", status, str(i), "")
+               for i, status in enumerate(statuses, start=1)]
+    evals.save_results(conn, results, run_at)
+
+
+def test_latest_eval_run_returns_only_the_newest_run(conn):
+    t = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    save_run(conn, t, [evals.FAIL, evals.PASS])
+    save_run(conn, t + timedelta(minutes=1), [evals.PASS, evals.WARN, evals.SKIP])
+
+    assert queries.latest_eval_run(conn) == [
+        ("C1", "check 1", "PASS", "1"),
+        ("C2", "check 2", "WARN", "2"),
+        ("C3", "check 3", "SKIP", "3"),
+    ]
+
+
+def test_eval_score_history_counts_fail_as_not_passed_and_ignores_skip(conn):
+    t = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    save_run(conn, t, [evals.FAIL, evals.PASS, evals.PASS])
+    save_run(conn, t + timedelta(minutes=1), [evals.PASS, evals.WARN, evals.SKIP])
+
+    # WARN counts as passed (like the exit code); SKIP is left out of both numbers
+    assert queries.eval_score_history(conn) == [(t, 2, 3), (t + timedelta(minutes=1), 2, 2)]
+
+
+def test_eval_score_history_keeps_only_the_last_runs(conn):
+    t = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    for i in range(5):
+        save_run(conn, t + timedelta(minutes=i), [evals.PASS])
+
+    history = queries.eval_score_history(conn, limit=3)
+
+    assert [row[0] for row in history] == [t + timedelta(minutes=i) for i in (2, 3, 4)]
+
+
+def test_dashboard_shows_the_data_quality_panel(conn, dashboard_db):
+    t = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    save_run(conn, t, [evals.PASS, evals.PASS, evals.FAIL, evals.WARN])
+
+    at = run_dashboard()
+
+    assert not at.exception
+    metrics = {m.label: m.value for m in at.metric}
+    assert metrics == {"Score (latest run)": "3/4", "Warnings": "1", "Failures": "1"}
+    assert len(at.dataframe[-1].value) == 4

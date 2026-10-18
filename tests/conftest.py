@@ -41,7 +41,7 @@ def conn(test_dsn):
     """A connection to the test database with an empty posts table."""
     connection = psycopg2.connect(test_dsn)
     with connection.cursor() as cur:
-        cur.execute("TRUNCATE posts RESTART IDENTITY")
+        cur.execute("TRUNCATE posts, eval_results RESTART IDENTITY")
     connection.commit()
     yield connection
     connection.close()
